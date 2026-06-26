@@ -1,0 +1,482 @@
+<!DOCTYPE HTML>
+<html lang="en"></html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Battery Management System (BMS) Project</title>
+    <script src ="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body> 
+    <h1>Battery Management System (BMS)</h1>
+    <h2 id = "profileTitle"> MG Cyberster</h2>
+    <p>This project shows you how three algorithms work together to manage the SoC (state of charge) of the battery pack.</p>
+    <div id="profileselector" style = "text-align: centre ; margin: 16px 0;">
+        <button onclick ="selectProfile('cyberster')">MG Cyberster</button>
+        <button onclick ="selectProfile('iphone')">iPhone 14</button>
+        <button onclick ="selectProfile('custom')">Custom</button>
+    </div>
+    <label for = "capacity">Battery Capacity:</label>
+    <input type = "number" id = "capacity" value = "17.3"> 
+    <label for = "voltage per cell">Voltage per Cell:</label>
+    <input type="number" id="voltagePerCell" value="3.2" oninput="updateDischargeCurve()">
+    <label for = "number of cell">Number of Cells:</label>
+    <input type = "number" id = "numberofcells" value = "72">
+   
+    <button id="startBtn" onclick="startSimulation()">Start Simulation</button>
+    <div class="mycontainer">
+        <div>Coulomb Counting Algorithm<p id="cc">--</p></div>
+        <div> Open Circuit Voltage Algorithm<p id="ocv">--</p></div>
+        <div>Kalman Filter Algorithm<p id="kf">--</p></div>
+    </div>
+    <div class = "info">
+         <div> State of Health<p id="soh" style="color: #2c3e50;">100.0%</p></div>
+        <div> Battery Temperature<p id="temp" style="color: #2c3e50;">25.0°C</p></div>
+    </div>
+    
+    <button onclick= "carSleep()">Car Sleep</button>
+    <button onclick= "carOn()">Car On</button>
+    <div class="charts"> 
+        <div>
+            <h3>SoC Algorithm Comparison</h3>
+            <div style = "height:300px;">
+                <canvas id="myChart"></canvas>
+            </div>
+        </div>
+        <div>
+            <h3 id="dischargeTitle">LFP vs NMC Discharge Curve</h3>
+            <div style = "height:300px;">
+                <canvas id="dischargeChart"></canvas>
+        </div>
+        </div>
+    </div>
+
+    <div style="text-align:center; margin: 20px 0;">
+    <svg id="batteryIcon" width="120" height="60" viewBox="0 0 120 60">
+        <rect x="2" y="10" width="100" height="40" rx="6" ry="6"
+              fill="none" stroke="#ccc" stroke-width="3"/>
+        <rect x="102" y="20" width="10" height="20" rx="3" ry="3"
+              fill="#ccc"/>
+        <rect id="batteryFill" x="5" y="13" width="94" height="34"
+              rx="4" ry="4" fill="green"/>
+    </svg>
+    <div id="batteryLabel" style="font-weight:bold; color: green;">100%</div>
+</div>
+<div id="faultBanner" style="display:none; background: red; color: white; padding: 10px; text-align: center; 
+    border-radius: 8px; font-weight: bold; margin: 10px 0;">
+    FAULT DETECTED - CC and KF have diverged!
+</div>
+
+</body>
+<script>
+    let trueSoC = 100 
+    let KSoc = 100
+    let OCVSoC = ""
+    let drift = 0
+
+    let ccarr = []
+    let kfarr = []
+    let tarr = []
+
+    let simulationRunning = false; // Flag to track if the simulation is running
+    let soh = 100
+    let temp = 25
+
+    const ctx2 = document.getElementById("dischargeChart").getContext("2d");
+    const dischargeChart = new Chart(ctx2, {
+        type: "line",
+        data: {
+            labels: [0,10,20,30,40,50,60,70,80,90,100],
+            datasets: [
+            {
+                label: "LFP",
+                data: [3.4, 3.3, 3.25, 3.22, 3.21, 3.20, 3.20, 3.19, 3.18, 3.0, 2.8],
+                borderColor: "green",
+                fill: false
+            },
+            {
+                label: "NMC",
+                data: [4.2, 4.0, 3.85, 3.75, 3.65, 3.55, 3.45, 3.35, 3.25, 3.15, 3.0],
+                borderColor: "orange",
+                fill: false
+            }
+            
+        ]
+    },
+    options: {
+                responsive: true,
+                maintainAspectRatio: false,
+            }
+});
+    const ctx = document.getElementById("myChart").getContext("2d");
+    const myChart = new Chart(ctx, {
+    type: "line",
+    data: {
+        labels: tarr,
+        datasets: [
+            { label: "Coulomb Counting", data: ccarr, borderColor: "red" , fill: false},
+            { label: "Kalman Filter", data: kfarr, borderColor: "blue", fill: false}
+        ]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        
+        scales: {
+            y: {
+                min: 0,
+                max: 100
+            }
+        
+        }
+    },
+});
+const batteryProfiles ={ 
+    cyberster: {
+        name: "MG Cyberster",
+        capacity: 77,
+        cells: 300,
+        voltage: 3.2,
+        maxTemp: 45,
+        dischargerate: 2
+    },
+    iphone: {
+        name: "iPhone 14",
+        capacity: 0.0119,
+        cells: 1,
+        voltage: 3.7,
+        maxTemp: 35,
+        dischargerate: 0.05
+    },
+    custom: {
+        name: "Cutstom",
+        capacity: null,
+        cells: null,
+        voltage: null,
+        maxTemp: 45,
+        dischargerate:2
+    }
+
+}
+function updateBatteryIcon(soc) {
+    const fill = document.getElementById("batteryFill");
+    const label = document.getElementById("batteryLabel");
+    const width = Math.max(0, (soc /100) * 94); // Ensure width is not negative
+    const color = soc > 50 ? "green" : soc > 20 ? "orange" : "red";
+    fill.setAttribute("width", width);
+    fill.setAttribute("fill", color);
+    label.textContent =soc.toFixed(1) + "%";
+    label.style.color = color;
+}
+function checkFault(ccValue, kfValue) {
+    const banner = document.getElementById("faultBanner");
+    const diff = Math.abs(ccValue - kfValue);
+    
+    if(temp > 45){
+        banner.style.display = "block";
+        banner.style.background = "darkred";
+        banner.textContent = "Thermal Warning - Bateery Overheating: " + temp.toFixed(1) + " °C";
+    }
+    else if(diff > 2){
+        banner.style.display = "block";
+        banner.style.background = "red";
+        banner.textContent ="FAULT DETECTED - CC and KF have diverged!";    
+    }else{
+        banner.style.display = "none";
+    }
+
+    }
+        
+    function startSimulation(){
+        if(simulationRunning) return; // Prevent multiple intervals from being created
+        simulationRunning = true;
+        document.getElementById("startBtn").disabled = true;
+    setInterval(function() {
+        let capacity = parseFloat(document.getElementById("capacity").value) || 17.3
+        let cells = parseFloat(document.getElementById("numberofcells").value) || 72
+        
+       //trueSoC -= 2 /(capacity *(soh/100) + cells / 72)
+        //trueSoC = Math.max(0, trueSoC)
+        
+        drift += (Math.random() - 0.5)* 0.3; // Simulate drift in Coulomb counting
+        drift = Math.max(-5, Math.min(5, drift)); // Clamp drift between -5 and 5   
+        ccNoisy = trueSoC + drift + (Math.random() * 2 ); // Simulate noise and drift in Coulomb counting
+          if (ccNoisy > 100){
+            ccNoisy = 100
+        }
+        document.getElementById("cc").innerHTML = ccNoisy.toFixed(1) + "%";
+      
+        ccarr.push(ccNoisy);
+        tarr.push(new Date().toLocaleTimeString());
+       
+        
+        KSoc = KSoc * 0.7 + trueSoC * 0.3; // Simulate Kalman filter estimation
+        document.getElementById("kf").innerHTML = (KSoc).toFixed(1) + "%";
+        updateBatteryIcon(KSoc);
+        checkFault(ccNoisy, KSoc);
+        kfarr.push(KSoc);
+        myChart.update();
+
+        if (trueSoC < 0){
+            trueSoC = 0
+        }
+        if (KSoc < 0 ){
+            KSoc = 0
+        }
+        soh -= 0.01; // Simulate gradual degradation of battery health
+        soh = Math.max(0, soh);
+        const sohElement = document.getElementById("soh");
+        sohElement.textContent = soh.toFixed(1) + "%";
+        sohElement.style.color = soh > 80 ? "#27ae60" : soh > 50 ? "orange" : "red";
+
+        temp += 0.1 + (Math.random() * 0.05); // Simulate temperature changes
+        temp = Math.min(temp, 60); // Clamp temperature between
+        const tempElement = document.getElementById("temp");
+        tempElement.textContent = temp.toFixed(1) + "°C";
+        tempElement.style.color = temp < 35 ? "#27ae60" : temp < 45 ? "orange" : "red";
+        const profile = batteryProfiles[currentProfile];
+        const rate = profile.dischargerate || 2 ;
+        trueSoC -= rate / (capacity * (soh/100) + cells/72)
+        trueSoC = Math.max(0, trueSoC);
+    }
+ ,1000);
+}
+
+    function carSleep() {
+            document.getElementById("ocv").innerHTML = trueSoC.toFixed(1) + "%";
+        }
+    function carOn() {
+            drift = 0; // Reset drift when the car is turned on
+            document.getElementById("ocv").innerHTML = "--";
+        }
+    function updateDischargeCurve() {
+       let voltage = parseFloat(document.getElementById("voltagePerCell").value) || 3.2
+       let t = (voltage - 3.2) / (4.2 - 3.2) // 0 = lfp, 1 = nmc
+       t = Math.max(0, Math.min(1,t)) // Clamp t between 0 and 1
+       let lfp = [3.4, 3.3, 3.25, 3.22, 3.21, 3.20, 3.20, 3.19, 3.18, 3.0, 2.8]
+       let nmc = [4.2, 4.0, 3.85, 3.75, 3.65, 3.55, 3.45, 3.35, 3.25, 3.15, 3.0]
+
+       dischargeChart.data.datasets[0].data = lfp.map((v, i) => v + t * (nmc[i] - v));
+       dischargeChart.update();
+    }
+    function resetsim(){
+        trueSoC = 100;
+        KSoc = 100;
+        drift =0 ;
+        soh = 100;
+        temp = 25;
+        ccarr.length = 0;
+        kfarr.length = 0;
+        tarr.length = 0;
+        myChart.update();
+        simulationRunning = false;
+        document.getElementById("startBtn").disabled = false;
+        document.getElementById("cc").textContent = "--";
+        document.getElementById("kf").textContent = "--";
+        document.getElementById("ocv").textContent = "--";
+        document.getElementById("soh").textContent = "100.0%";
+        document.getElementById("temp").textContent = "25.0°C";
+        updateBatteryIcon(100);
+        document.getElementById("faultBanner").style.display = "none";
+
+    }
+    let currentProfile = 'cyberster';
+    function selectProfile(profilekey) {
+        currentProfile = profilekey;
+        const profile = batteryProfiles[profilekey];
+
+        if (profilekey != 'custom'){
+            document.getElementById("capacity").value = profile.capacity;
+            document.getElementById("voltagePerCell").value = profile.voltage;
+            document.getElementById("numberofcells").value = profile.cells;
+            updateDischargeCurve();
+        }
+        document.getElementById("profileTitle").textContent = profile.name;
+        resetsim();
+
+        if ( profilekey == 'iphone') {
+            dischargeChart.data.datasets[0].hidden = true;
+            document.querySelector('#dischargeChart').textContent = 'NMC Discharge Curve - iPhone 14';
+        } else {
+            dischargeChart.data.datasets[0].hidden = false;
+            document.querySelector('#dischargeChart').textContent = 'LFP vs NMC Discharge Curve';
+        }
+        dischargeChart.update();
+    }
+    selectProfile('cyberster');
+    </script>
+
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+        font-family: 'Inter', sans-serif;
+        background-color: #f2f2f7;
+        padding: 32px 28px;
+        max-width: 1400px;
+        margin: 0 auto;
+        color: #1c1c1e;
+    }
+    h1 {
+        font-size: 1.6rem;
+        font-weight: 600;
+        text-align: center;
+        color: #1c1c1e;
+        letter-spacing: -0.02em;
+    }
+    h2 {
+        font-size: 1rem;
+        font-weight: 400;
+        text-align: center;
+        color: #6e6e73;
+        margin-top: 4px;
+        margin-bottom: 4px;
+    }
+    h3 {
+        font-size: 0.78rem;
+        font-weight: 600;
+        text-align: center;
+        color: #6e6e73;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-bottom: 12px;
+    }
+    p {
+        color: #6e6e73;
+        text-align: center;
+        font-size: 0.9rem;
+        margin-bottom: 24px;
+    }
+    button {
+        background-color: #1c1c1e;
+        color: #ffffff;
+        border: none;
+        padding: 10px 22px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 0.82rem;
+        font-family: 'Inter', sans-serif;
+        font-weight: 500;
+        margin: 4px;
+        transition: background 0.15s;
+    }
+    button:hover { background-color: #3a3a3c; }
+    button:disabled { background-color: #aeaeb2; cursor: not-allowed; }
+
+    input {
+        padding: 8px 12px;
+        margin: 4px;
+        border-radius: 8px;
+        border: 1px solid #d1d1d6;
+        outline: none;
+        font-size: 0.82rem;
+        font-family: 'Inter', sans-serif;
+        background: #ffffff;
+        color: #1c1c1e;
+    }
+    input:focus { border-color: #0071e3; }
+
+    label {
+        font-size: 0.82rem;
+        font-weight: 500;
+        color: #3a3a3c;
+        margin-left: 8px;
+    }
+
+    /* Cards */
+    .mycontainer {
+        display: flex;
+        gap: 12px;
+        margin: 20px 0 12px;
+    }
+    .mycontainer > div {
+        flex: 1;
+        background: #ffffff;
+        border: 1px solid #e5e5ea;
+        border-radius: 12px;
+        padding: 18px 16px;
+        text-align: center;
+        border-top: 3px solid #e5e5ea;
+    }
+    .mycontainer > div:nth-child(1) { border-top-color: #ff3b30; }
+    .mycontainer > div:nth-child(2) { border-top-color: #ff9500; }
+    .mycontainer > div:nth-child(3) { border-top-color: #0071e3; }
+
+    .mycontainer > div p {
+        font-size: 2rem;
+        font-weight: 600;
+        margin: 8px 0 0;
+        color: #1c1c1e;
+    }
+
+    .mycontainer > div, .inforow > div {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #6e6e73;
+    }
+
+    .info {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 20px;
+    }
+    .info > div {
+        flex: 1;
+        background: #ffffff;
+        border: 1px solid #e5e5ea;
+        border-radius: 12px;
+        padding: 18px 16px;
+        text-align: center;
+    }
+    .info p {
+        font-size: 2rem;
+        font-weight: 600;
+        margin: 8px 0 0;
+        color: #1c1c1e;
+    }
+    .info > div {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #6e6e73;
+}
+
+
+    /* Charts */
+    .charts {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 20px;
+    }
+    .charts > div {
+        flex: 1;
+        min-width: 0;
+        min-height: 350px;
+        background: #ffffff;
+        border: 1px solid #e5e5ea;
+        border-radius: 12px;
+        padding: 20px;
+        height: 380px;
+    }
+  
+    
+    #startBtn {
+        display: block;
+        margin-top: 12px;
+    }
+
+    #faultBanner {
+        border-radius: 10px;
+        font-size: 0.88rem;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+    }
+    #dischargeChart {
+        height: 300px !important;
+    }
+</style>
