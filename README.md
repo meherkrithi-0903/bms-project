@@ -27,7 +27,7 @@ Small measurement errors in current accumulate over time. The simulator models t
 # What does the Kalman Filter do here?
 It blends the noisy CC reading with the previous state estimate using a fixed gain (KSoc = KSoc * 0.7 + trueSoC * 0.3). In a production BMS this gain would be computed dynamically based on process and measurement noise covariances.
 
-#What triggers the fault banner?
+# What triggers the fault banner?
 If the CC and KF estimates diverge by more than 2%, or the battery temperature exceeds 45°C, a fault alert is shown — mimicking how a real BMS raises diagnostic trouble codes (DTCs).
 
 
