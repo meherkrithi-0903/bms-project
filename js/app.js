@@ -9,6 +9,7 @@ let kfarr = [];
 let tarr = [];
 
 let simulationRunning = false;
+let simulationInterval = null;
 let soh = 100;
 let temp = 25;
 
@@ -139,7 +140,7 @@ function startSimulation() {
     simulationRunning = true;
     document.getElementById("startBtn").disabled = true;
 
-    setInterval(function() {
+    simulationInterval = setInterval(function() {
         let capacity =
             parseFloat(document.getElementById("capacity").value) || 17.3;
 
@@ -239,6 +240,10 @@ function updateDischargeCurve() {
 }
 
 function resetsim() {
+    if (simulationInterval !== null) {
+    clearInterval(simulationInterval);
+    simulationInterval = null;
+}
     trueSoC = 100;
     KSoc = 100;
     drift = 0;
