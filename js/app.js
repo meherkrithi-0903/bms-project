@@ -137,21 +137,29 @@ function checkFault(ccValue, kfValue) {
 function startSimulation() {
     if (simulationRunning) return;
 
+    const capacity = parseFloat(document.getElementById("capacity").value);
+    const current = parseFloat(document.getElementById("current").value);
+    const packVoltage = parseFloat(document.getElementById("packVoltage").value);
+
+    if (
+        !Number.isFinite(capacity) || capacity <= 0 ||
+        !Number.isFinite(current) ||
+        !Number.isFinite(packVoltage) || packVoltage <= 0
+    ) {
+        alert("Please enter valid battery capacity, current and pack voltage.");
+        return;
+    }
+
+    const capacityAh = (capacity * 1000) / packVoltage;
+
     simulationRunning = true;
     document.getElementById("startBtn").disabled = true;
 
     simulationInterval = setInterval(function() {
-        let capacity =parseFloat(document.getElementById("capacity").value) || 17.3;
-        let current = parseFloat(document.getElementById("current").value) || 10;
 
-        let cells = parseFloat(document.getElementById("numberofcells").value) || 72;
-        const profile = batteryProfiles[currentProfile];
-        const packVoltage = profile.packVoltage;
-        const capacityAh = (capacity * 1000) / packVoltage;
+        const ccNoisy = ccSoC;
 
-        let ccNoisy = ccSoC;
-
-        document.getElementById("cc").innerHTML =
+        document.getElementById("cc").textContent =
             ccNoisy.toFixed(1) + "%";
 
         ccarr.push(ccNoisy);
@@ -159,7 +167,7 @@ function startSimulation() {
 
         KSoc = KSoc * 0.7 + trueSoC * 0.3;
 
-        document.getElementById("kf").innerHTML =
+        document.getElementById("kf").textContent =
             KSoc.toFixed(1) + "%";
 
         updateBatteryIcon(KSoc);
@@ -168,36 +176,26 @@ function startSimulation() {
         kfarr.push(KSoc);
         myChart.update();
 
-        if (trueSoC < 0) {
-            trueSoC = 0;
-        }
-
-        if (KSoc < 0) {
-            KSoc = 0;
-        }
-
-        soh -= 0.01;
-        soh = Math.max(0, soh);
+        soh = Math.max(0, soh - 0.01);
 
         const sohElement = document.getElementById("soh");
         sohElement.textContent = soh.toFixed(1) + "%";
         sohElement.style.color =
             soh > 80 ? "#27ae60" : soh > 50 ? "orange" : "red";
 
-        temp += 0.1 + (Math.random() * 0.05);
-        temp = Math.min(temp, 60);
+        temp = Math.min(60, temp + 0.1 + Math.random() * 0.05);
 
         const tempElement = document.getElementById("temp");
         tempElement.textContent = temp.toFixed(1) + "°C";
         tempElement.style.color =
             temp < 35 ? "#27ae60" : temp < 45 ? "orange" : "red";
 
-        const deltaTime = 1; // Simulation interval in seconds
-        const deltaSoC =(current * deltaTime / (capacityAh * 3600)) * 100;
-        trueSoC -= deltaSoC;
-        trueSoC = Math.max(0, Math.min(100, trueSoC));
-        ccSoC -= deltaSoC;
-        ccSoC = Math.max(0, Math.min(100, ccSoC));
+        const deltaTime = 1;
+        const deltaSoC =
+            (current * deltaTime / (capacityAh * 3600)) * 100;
+
+        trueSoC = Math.max(0, Math.min(100, trueSoC - deltaSoC));
+        ccSoC = Math.max(0, Math.min(100, ccSoC - deltaSoC));
 
     }, 1000);
 }
@@ -212,28 +210,8 @@ function carOn() {
 }
 
 function updateDischargeCurve() {
-    let voltage =
-        parseFloat(document.getElementById("voltagePerCell").value) || 3.2;
-
-    let t = (voltage - 3.2) / (4.2 - 3.2);
-    t = Math.max(0, Math.min(1, t));
-
-    let lfp = [
-        3.4, 3.3, 3.25, 3.22, 3.21,
-        3.20, 3.20, 3.19, 3.18, 3.0, 2.8
-    ];
-
-    let nmc = [
-        4.2, 4.0, 3.85, 3.75, 3.65,
-        3.55, 3.45, 3.35, 3.25, 3.15, 3.0
-    ];
-
-    dischargeChart.data.datasets[0].data =
-        lfp.map((v, i) => v + t * (nmc[i] - v));
-
     dischargeChart.update();
 }
-
 function resetsim() {
     if (simulationInterval !== null) {
     clearInterval(simulationInterval);
@@ -271,15 +249,12 @@ function selectProfile(profilekey) {
     currentProfile = profilekey;
 
     const profile = batteryProfiles[profilekey];
-
+    
     if (profilekey !== "custom") {
         document.getElementById("capacity").value = profile.capacity;
-        document.getElementById("voltagePerCell").value = profile.voltage;
+        document.getElementById("packVoltage").value = profile.packVoltage;
         document.getElementById("numberofcells").value = profile.cells;
-
-        updateDischargeCurve();
-    }
-
+}
     document.getElementById("profileTitle").textContent = profile.name;
 
     resetsim();
