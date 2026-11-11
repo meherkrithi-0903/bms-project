@@ -1,8 +1,8 @@
 
 let trueSoC = 100;
 let KSoc = 100;
+let ccSoC = 100;
 let OCVSoC = "";
-let drift = 0;
 
 let ccarr = [];
 let kfarr = [];
@@ -78,7 +78,7 @@ const batteryProfiles = {
         name: "MG Cyberster",
         capacity: 77,
         cells: 300,
-        voltage: 3.2,
+        packVoltage: 320,
         maxTemp: 45,
         dischargerate: 2
     },
@@ -86,7 +86,7 @@ const batteryProfiles = {
         name: "iPhone 14",
         capacity: 0.0119,
         cells: 1,
-        voltage: 3.7,
+        packVoltage: 3.7,
         maxTemp: 35,
         dischargerate: 0.05
     },
@@ -141,20 +141,15 @@ function startSimulation() {
     document.getElementById("startBtn").disabled = true;
 
     simulationInterval = setInterval(function() {
-        let capacity =
-            parseFloat(document.getElementById("capacity").value) || 17.3;
+        let capacity =parseFloat(document.getElementById("capacity").value) || 17.3;
+        let current = parseFloat(document.getElementById("current").value) || 10;
 
-        let cells =
-            parseFloat(document.getElementById("numberofcells").value) || 72;
+        let cells = parseFloat(document.getElementById("numberofcells").value) || 72;
+        const profile = batteryProfiles[currentProfile];
+        const packVoltage = profile.packVoltage;
+        const capacityAh = (capacity * 1000) / packVoltage;
 
-        drift += (Math.random() - 0.5) * 0.3;
-        drift = Math.max(-5, Math.min(5, drift));
-
-        let ccNoisy = trueSoC + drift + (Math.random() * 2);
-
-        if (ccNoisy > 100) {
-            ccNoisy = 100;
-        }
+        let ccNoisy = ccSoC;
 
         document.getElementById("cc").innerHTML =
             ccNoisy.toFixed(1) + "%";
@@ -197,11 +192,12 @@ function startSimulation() {
         tempElement.style.color =
             temp < 35 ? "#27ae60" : temp < 45 ? "orange" : "red";
 
-        const profile = batteryProfiles[currentProfile];
-        const rate = profile.dischargerate || 2;
-
-        trueSoC -= rate / (capacity * (soh / 100) + cells / 72);
-        trueSoC = Math.max(0, trueSoC);
+        const deltaTime = 1; // Simulation interval in seconds
+        const deltaSoC =(current * deltaTime / (capacityAh * 3600)) * 100;
+        trueSoC -= deltaSoC;
+        trueSoC = Math.max(0, Math.min(100, trueSoC));
+        ccSoC -= deltaSoC;
+        ccSoC = Math.max(0, Math.min(100, ccSoC));
 
     }, 1000);
 }
@@ -212,7 +208,6 @@ function carSleep() {
 }
 
 function carOn() {
-    drift = 0;
     document.getElementById("ocv").innerHTML = "--";
 }
 
@@ -246,7 +241,7 @@ function resetsim() {
 }
     trueSoC = 100;
     KSoc = 100;
-    drift = 0;
+    ccSoC = 100;
     soh = 100;
     temp = 25;
 
