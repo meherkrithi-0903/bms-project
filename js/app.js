@@ -261,12 +261,10 @@ function selectProfile(profilekey) {
 
     if (profilekey === "iphone") {
         dischargeChart.data.datasets[0].hidden = true;
-        document.querySelector("#dischargeChart").textContent =
-            "NMC Discharge Curve - iPhone 14";
+        document.querySelector("#dischargeTitle").textContent = "NMC Discharge Curve - iPhone 14";
     } else {
         dischargeChart.data.datasets[0].hidden = false;
-        document.querySelector("#dischargeChart").textContent =
-            "LFP vs NMC Discharge Curve";
+        document.querySelector("#dischargeTitle").textContent = "LFP vs NMC Discharge Curve";
     }
 
     dischargeChart.update();
